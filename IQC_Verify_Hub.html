@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#1F3864">
+<link rel="icon" href="iqc-192.png">
+<title>IQC Verify — pending verification</title>
+<style>
+  :root{ --ink:#111; --line:#c9c9c9; --muted:#666; --amber:#e8a13a; --red:#c0392b; --green:#1e7a46; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; background:#f2f2f2; font-family:Arial, Helvetica, sans-serif; color:var(--ink); }
+  .statusbar{
+    position:sticky; top:0; z-index:20; background:#1c1c1c; color:#fff;
+    display:flex; align-items:center; gap:10px; padding:9px 14px; font-size:12.5px;
+  }
+  .statusbar b{ font-size:13.5px; letter-spacing:.3px; }
+  .statusbar .chip{ background:#333; border-radius:10px; padding:3px 9px; }
+  .statusbar .chip.ok{ background:var(--green); }
+  .statusbar .chip.warn{ background:#b7791f; }
+  .statusbar .chip.bad{ background:var(--red); }
+  .statusbar .spacer{ flex:1; }
+  .statusbar button{
+    background:#333; color:#fff; border:1px solid #555; border-radius:4px;
+    padding:4px 10px; font-size:12px; cursor:pointer;
+  }
+  .statusbar button:hover{ background:#444; }
+  .wrap{ max-width:1000px; margin:18px auto 60px; padding:0 14px; }
+  h1{ font-size:18px; margin:0 0 3px; font-weight:bold; }
+  .sub{ font-size:12.5px; color:var(--muted); margin:0 0 16px; }
+  .card{ background:#fff; border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+  .row{
+    display:flex; align-items:center; gap:14px; padding:12px 14px;
+    border-bottom:1px solid #e6e6e6;
+  }
+  .row:last-child{ border-bottom:none; }
+  .row:hover{ background:#fafafa; }
+  .row .main{ flex:1; min-width:0; }
+  .row .t1{ font-size:14px; font-weight:bold; margin:0; }
+  .row .t2{ font-size:12px; color:var(--muted); margin:3px 0 0; }
+  .age{ font-size:11.5px; padding:3px 9px; border-radius:10px; white-space:nowrap; }
+  .age.new{ background:#e7f3ec; color:var(--green); }
+  .age.old{ background:#fdf1de; color:#8a5a10; }
+  .age.late{ background:#fbeaea; color:var(--red); }
+  .open{
+    background:var(--amber); color:#3a2600; border:none; border-radius:5px;
+    padding:8px 18px; font-size:13px; font-weight:bold; cursor:pointer; white-space:nowrap;
+  }
+  .open:hover{ filter:brightness(1.06); }
+  .open:disabled{ background:#ddd; color:#888; cursor:not-allowed; }
+  .empty{ padding:34px 14px; text-align:center; color:var(--muted); font-size:13.5px; }
+  .err{ padding:20px 14px; color:var(--red); font-size:13px; }
+  .note{ font-size:11.5px; color:var(--muted); margin:14px 2px 0; line-height:1.6; }
+  .modal{ display:none; position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:60;
+    align-items:center; justify-content:center; }
+  .modal.show{ display:flex; }
+  .modal .box{ background:#fff; border-radius:6px; padding:16px; width:94%; max-width:520px; }
+  .modal h3{ margin:0 0 10px; font-size:15px; }
+  .modal input{ width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; font-size:12.5px; }
+  .modal .acts{ display:flex; gap:8px; margin-top:12px; }
+  .modal .acts button{ flex:1; padding:9px; border:none; border-radius:4px; font-weight:bold; cursor:pointer; }
+  .modal .acts .save{ background:var(--amber); }
+  .modal .acts .cancel{ background:#eee; }
+
+  /* ================= phone & tablet =================
+     Every rule below sits inside a media query, so the laptop layout stays
+     exactly as it was - a desktop with a mouse matches none of these. */
+
+  /* Android inflates text in landscape unless told not to */
+  html{ -webkit-text-size-adjust:100%; }
+
+  @media (max-width:700px){
+    /* six items in one flex line overflowed a 360px phone; let them wrap and
+       drop the spacer, which has nothing left to push against once wrapped */
+    .statusbar{ flex-wrap:wrap; gap:8px; padding:8px 10px; }
+    /* zero-height full-width spacer = a forced line break, so the title and
+       chips take line 1 and BOTH buttons stay together on line 2. Hiding it
+       instead left Refresh beside the chips and the gear stranded alone. */
+    .statusbar .spacer{ flex:0 0 100%; height:0; }
+    .wrap{ margin:12px auto 48px; padding:0 10px; }
+    h1{ font-size:17px; }
+
+    /* Each record stacks: description, then the DO/date line, then the age
+       chip and a full-width Open. Side by side, a long description was being
+       squeezed to a few characters on a phone. */
+    .row{ flex-wrap:wrap; gap:8px; padding:12px; }
+    .row .main{ flex:1 1 100%; }
+    .row .t1, .row .t2{ overflow-wrap:anywhere; }
+    .age{ order:2; }
+    .open{ order:3; flex:1 1 100%; padding:12px 18px; font-size:14px; }
+
+    .note{ font-size:12px; }
+    /* 16px stops the browser zooming the whole page when the field is tapped,
+       which otherwise leaves the hub scrolled sideways afterwards */
+    .modal input{ font-size:16px; padding:10px; }
+    .modal .box{ width:96%; padding:14px; }
+  }
+
+  /* Touch screens only - a laptop with a mouse never matches this, so nothing
+     here can move the desktop layout. 44px is the smallest target a fingertip
+     hits reliably, and a supervisor is often doing this standing on the floor. */
+  @media (hover:none) and (pointer:coarse){
+    .statusbar button{ min-height:40px; min-width:44px; padding:8px 14px; font-size:13px; }
+    .open{ min-height:44px; }
+    .modal .acts button{ min-height:46px; font-size:14px; }
+    .row{ padding-top:14px; padding-bottom:14px; }
+    /* :hover sticks on a touch screen after a tap, leaving a row shaded */
+    .row:hover{ background:#fff; }
+    .statusbar button:hover{ background:#333; }
+    .open:hover{ filter:none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="statusbar">
+  <b>IQC VERIFY</b>
+  <span class="chip" id="chipCount">loading…</span>
+  <span class="chip" id="chipState">connecting…</span>
+  <span class="spacer"></span>
+  <button onclick="load()">Refresh</button>
+  <button onclick="openSettings()">&#9881;</button>
+</div>
+
+<div class="wrap">
+  <h1>Pending verification</h1>
+  <p class="sub" id="sub">Records submitted by IQC and waiting for a supervisor signature.</p>
+  <div class="card" id="list"><div class="empty">Loading…</div></div>
+  <p class="note">
+    Click <b>Open</b> and the correct inspection form opens with that record already loaded and locked.
+    Sign it, press <b>Verify &amp; Save</b>, then come back to this tab and it will refresh by itself.<br>
+    This page must be opened from the same folder as the form files.
+  </p>
+</div>
+
+<div class="modal" id="setModal">
+  <div class="box">
+    <h3>Sync endpoint</h3>
+    <input type="text" id="setUrl" placeholder="https://script.google.com/macros/s/.../exec">
+    <div class="acts">
+      <button class="save" onclick="saveSettings()">Save</button>
+      <button class="cancel" onclick="closeSettings()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* The IQC Apps Script's own /exec URL - bound to "IQC Submissions Inbox",
+   NOT the QC script. This must stay identical to DEFAULT_SCRIPT_URL in every
+   IQC form file, or the hub and the forms will disagree about where records
+   live. The QC deployment is a completely different URL (AKfycbwYz5hw...)
+   and must never appear in this file. */
+const DEFAULT_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzI8vjkmyzoVfY5hPZYA7bjTyYRMrZQFnXsrmRYw2S76t5hyI-1gh5LrT1_A5m2J-7L2g/exec';
+/* IQC keeps its own settings key. Sharing 'qc_form_settings_v1' with the QC
+   forms meant one localStorage entry for both systems on the same file://
+   origin, so whichever page saved a URL last silently repointed the other
+   system at the wrong Apps Script and the wrong inbox. */
+const SETTINGS_KEY = 'iqc_form_settings_v1';
+
+/* Form Name recorded in the sheet  ->  the file that draws that form.
+   Add a line here whenever a new IQC inspection form is added to the
+   \\192.168.1.42\p1QaFile$\IQCForms\ folder. Only build up this list as
+   each new IQC form is finished and confirmed - do not pre-fill guesses. */
+const FORM_FILES = {
+  "QF-QC-001 IQC 60\" Posts -R0": "60_Post-R0.html",
+  "QF-QC-001 IQC Angle Bar -R1": "Angle_Bar-R1.html",
+  "QF-QC-001 IQC Bending Metal Plate 30x95x2mmx800mmL -R0": "Bending_Metal_Plate_30x95x2mmx800mmL-R0.html",
+  "QF-QC-001 IQC Bending Metal Plate 40x40x2mmx850mmL -R0": "Bending_Metal_Plate_40x40x2mmx850mmL-R0.html",
+  "QF-QC-001 IQC Board -R2": "Board-R2.html",
+  "QF-QC-001 IQC Bolt & Nut (M6x35) -R2": "Bolt_and_Nut_M6_x_35-R2.html",
+  "QF-QC-001 IQC Bolt , Washer and Nut (M10x25) ~Counter Sunk -R3": "Bolt_and_nut-Counter_Sunk_M10_x_25_-R3.html",
+  "QF-QC-001 IQC Bolt Hex M8 x 16 and Nut & Washer M8 (Modular) -R0": "Bolt_Hex_M8_x_16_and_Nut___Washer_M8__Modular_-R0.html",
+  "QF-QC-001 IQC Bolt Hex M8 x 16 and Nut M8 -R1": "Bolt_Hex_M8_x_16_and_Nut_M8__Slotted_Angle_Bar_-R1.html",
+  "QF-QC-001 IQC Bolt M6.35x12.7 (Truss head ) & Hex Nut M6 -R0": "Bolt_M6_35x12_7__Truss_head_____Hex_Nut_M6_-R0__Global_.html",
+  "QF-QC-001 IQC Bolt M8x35 (Head Cap) & Nut Nylon Insert M8 -R2": "Bolt_M8x35__Head_Cap____Nut_Nylon_M8-R2__Global_.html",
+  "QF-QC-001 IQC Bolt and nut (5/16\" x 5/8\") -R3": "Bolt_and_nut-7_94_x_15_8mm-R3.html",
+  "QF-QC-001 IQC Bolt and nut (M10* ) -R2": "Bolt_and_nut-M10_x_60___75-R2.html",
+  "QF-QC-001 IQC Bolt, nut and washer (M10*20) -R2": "Bolt_and_nut_and_washer-M10_x_20-R2.html",
+  "QF-QC-001 IQC Bolt, nut and washer (M8*20) -R2": "Bolt_and_nut_and_washer-M8_x_20-R2.html",
+  "QF-QC-001 IQC Carton Box (36-IN Vertical Posts) -R0": "Carton_Box__36-In_Vertical_Posts_-R0.html",
+  "QF-QC-001 IQC Carton Box (Bar Rack Horizontal Stacking) -R0": "Carton_Box_Bar_Rack_Horizontal_Stacking-R0.html",
+  "QF-QC-001 IQC Carton Box (Double Rivet Beam Kit) -R1": "Carton_Box_Double_Rivet_Beam_Kit-R1.html",
+  "QF-QC-001 IQC Carton Box (Hd Shelving) -R8": "Carton_Box_HD_Shelving-R8.html",
+  "QF-QC-001 IQC Carton Box (Prosource) -R1": "Carton_Box__Prosource_-R1.html",
+  "QF-QC-001 IQC Carton Box (Shelf Frame Kit) (Outer) -R0": "Carton_Box__Shelf_Frame_Kit-_Outer_-R0.html",
+  "QF-QC-001 IQC Carton Box (Shelf Frame Kit) -R0": "Carton_Box__Shelf_Frame_Kit-_Inner_-R0.html",
+  "QF-QC-001 IQC Carton Box (Steel Deck) -R2": "Carton_Box_Steel_Deck-R2.html",
+  "QF-QC-001 IQC Carton Box (Steel Shelf Deck) -R0": "Carton_Box__Steel_Shelf_Deck_-R0.html",
+  "QF-QC-001 IQC Carton Box (Storage Concept) -R1": "Carton_Box__Storage_Concept_-R1.html",
+  "QF-QC-001 IQC Carton Box (Vertical Posts) 72-IN 84-IN -R0": "Carton_Box__72-In___84-In_Vertical_Posts_-R0.html",
+  "QF-QC-001 IQC Carton Box (Wire Mesh) -R0": "Carton_Box_Wire_Mesh__Project_Source_-R0.html",
+  "QF-QC-001 IQC Carton Box (Wire Shelf Deck) -R0": "Carton_Box__Wire_Shelf_Deck_-R0.html",
+  "QF-QC-001 IQC Carton Box -R0": "Carton_Box__2_in_1_Rack_-R0.html",
+  "QF-QC-001 IQC Carton Box -R1": "Carton_Box__180_Rack_-R1.html",
+  "QF-QC-001 IQC Carton Box -R2": "Carton_Box_Board__Project_Source_-R2.html",
+  "QF-QC-001 IQC Carton Box 60\"Post (4pcs) -R0": "Carton_Box__60_Post_-R0.html",
+  "QF-QC-001 IQC Carton Box Angle Post (4pcs) -R2": "Carton_Box_Angle_Post-R2.html",
+  "QF-QC-001 IQC Carton Box Axle Bracket Kit Packaging -R1": "Carton_Box__Axle_Bracket_-R1.html",
+  "QF-QC-001 IQC Carton Box MD Racking Product ~ Model -R1": "Carton_Box__EMTS_MD_Product_-R1.html",
+  "QF-QC-001 IQC Carton Box Mona Rack (Good Home) -R0": "Carton_Box__Mona_Rack_Good_Home_-R0.html",
+  "QF-QC-001 IQC Chip Board / Board (HDF/MDF/LDF) -R3": "Chip_Board-R3.html",
+  "QF-QC-001 IQC Coil -R3": "Coil-R3.html",
+  "QF-QC-001 IQC Conduit Steel Socket -R1": "Conduit_Steel_Socket-R1.html",
+  "QF-QC-001 IQC Corrugated Box 554x414x100mm (Top & Bottom ) -R0": "Corrugated_Box_554x414x100mm__Top___Bottom__-R0.html",
+  "QF-QC-001 IQC Gas Weight & Pressure Record -R1": "Gas_Weight___Pressure_Record-R1.html",
+  "QF-QC-001 IQC Hollow Section / Rect Pipe / Square Pipe -R1": "Hollow_Section-Rect_Pipe-Square_Pipe-R1.html",
+  "QF-QC-001 IQC L Locking Pin (S23) -R0": "L-Locking_S23-R0.html",
+  "QF-QC-001 IQC L Locking Pin 14.8x2.5mm(T)x6mmx64mmL -R3": "L-Locking_Pin_14_8x2_5mm_T_x6mmx64mmL-R3.html",
+  "QF-QC-001 IQC L Locking Pin 15mmx3mm(T)x7mmx68mmL -R3": "L-Locking_Pin_15mmx3mm_T_x7mmx68mmL-R3.html",
+  "QF-QC-001 IQC Metal Storage Profile 70x50x17x2mmx2050L -R0": "Metal_Storage_Profile_70x50x17x2mmx2050L-R0.html",
+  "QF-QC-001 IQC Modular Bar Stack Rack -R0": "Modular_Bar_Stack_Rack-R0.html",
+  "QF-QC-001 IQC Modular Bar Stack Rack Steel Cap -R0": "Modular_Bar_Stack_Rack_Steel_Cap-R0.html",
+  "QF-QC-001 IQC Mona New Center Support -R1": "Mona_New-_Center_Support-R1.html",
+  "QF-QC-001 IQC Plywood -R1": "Plywood-R1.html",
+  "QF-QC-001 IQC Portable Stack Rack -R3": "Portable_Stack_Rack-R3.html",
+  "QF-QC-001 IQC Powder Coatings -R5": "Powder-R5.html",
+  "QF-QC-001 IQC Rivet (Jaken) 11mmx2.1mm (T)x5.1mmx9.7mmL~ 0.8 -R0": "Rivet-_Steel_Jaken_0_8mm__China__-R0.html",
+  "QF-QC-001 IQC Rivet (Jaken) 11mmx2.1mm (T)x5.1mmx9.7mmL~ 0.8 -R4": "Rivet-_Steel_Jaken_0_8mm_-R4.html",
+  "QF-QC-001 IQC Rivet (Jaken) 7.6mm x 1.5mm(T) x7.5mmL -R1": "Rivet-_Aluminium_Jaken_S_-R1.html",
+  "QF-QC-001 IQC Rivet- 11 mm (Aluminium) -R5": "Rivet-_Aluminium_Eonmetall_-R5.html",
+  "QF-QC-001 IQC Rivet- 11 mm x 12.4 mm -R4": "Rivet-11_x_12_4_mm-R4.html",
+  "QF-QC-001 IQC Rivet- 11.5 mmL x 6.2 mm (Steel)": "Rivet-_11_5_mmL_x_6_2_mm_R2__Global_.html",
+  "QF-QC-001 IQC Round Bar -R1": "Bar-R1.html",
+  "QF-QC-001 IQC Rubber Shoes (Transparent) -R1": "Rubber_Shoes-Color_Rack__Transparent_-R1.html",
+  "QF-QC-001 IQC Rubber Shoes - Boltless Rack (Top) -R1": "Rubber_Shoes-Boltless_Rack__Top_-R1.html",
+  "QF-QC-001 IQC Rubber Shoes - Boltless Rack -R1": "Rubber_Shoes-Boltless_Rack__Bottom_-R1.html",
+  "QF-QC-001 IQC Rubber Stopper -R1": "Rubber_Stopper-R1.html",
+  "QF-QC-001 IQC Safety Lock Zinc Plated -R1": "Safety_Lock_Zinc_Plated_-_CR_18-R1.html",
+  "QF-QC-001 IQC Shelf Drill M5 x 45 ( Rainbow / Zinc Plating ) -R1": "Shelf_Drill_M5_x_45-Rainbow-_Zinc_Plating-R1.html",
+  "QF-QC-001 IQC Shelf Drill M5.5 x 55 ( Rainbow ) -R1": "Shelf_Drill_M5_5_x_55-_Rainbow-R1.html",
+  "QF-QC-001 IQC Tray (Big / Small) -R1": "Tray-R1.html",
+  "QF-QC-001 IQC Truss Head (M6*12) -R1": "Truss_Head-M6_x_12-R1.html",
+  "QF-QC-001 IQC Turnbuckles -R1": "Turnbuckles-R1.html",
+  "QF-QC-001 IQC Wire Mesh -R0": "Wire_Mesh-R0.html",
+  "QF-QC-001 IQC Wire Mesh 4.0x900x1335mm -R0": "Wire_Mesh_4_0x900x1335mm-R0.html",
+  "QF-QC-001 IQC Wire Mesh 4.5x1050x1035mm -R0": "Wire_Mesh_4_5x1050x1035mm-R0.html",
+  "QF-QC-001 IQC Wire Mesh 4.5x1050x1190mm -R0": "Wire_Mesh_4_5x1050x1190mm-R0.html",
+  "QF-QC-001 IQC Wire Mesh 4.5x1050x1330mm -R0": "Wire_Mesh_4_5x1050x1330mm-R0.html",
+  "QF-QC-001 IQC Wire Mesh 4.5x1050x1335mm -R1": "Wire_Mesh_4_5x1050x1335mm-R1.html",
+  "QF-QC-001 IQC Wire Mesh 4.5x905x1335mm -R0": "Wire_Mesh_4_5x905x1335mm-R0.html",
+  "QF-QC-001 IQC Wire Mesh 4.8x1000x1330mm -R0": "Wire_Mesh_4_8x1000x1330mm-R0.html",
+  "QF-QC-001 IQC Wire Mesh 4.8x900x1330mm -R0": "Wire_Mesh_4_8x900x1330mm-R0.html",
+  "QF-QC-001 IQC Wire Mesh 4x453x910mm -R0": "Wire_Mesh_4x453x910mm-R0.html",
+  "QF-QC-001 IQC Wire Mesh 4x605x1215mm -R0": "Wire_Mesh_4x605x1215mm-R0.html",
+  "QF-QC-001 IQC Wire Rod -R1": "Wire_Rod-R1.html"
+};
+
+function safeGet(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
+function safeSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
+function loadSettings(){
+  try{
+    const s = JSON.parse(safeGet(SETTINGS_KEY) || '{}');
+    if(!s.scriptUrl) s.scriptUrl = DEFAULT_SCRIPT_URL;
+    return s;
+  }catch(e){ return { scriptUrl: DEFAULT_SCRIPT_URL }; }
+}
+function openSettings(){
+  document.getElementById('setUrl').value = loadSettings().scriptUrl || '';
+  document.getElementById('setModal').classList.add('show');
+}
+function closeSettings(){ document.getElementById('setModal').classList.remove('show'); }
+function saveSettings(){
+  const s = loadSettings();
+  s.scriptUrl = document.getElementById('setUrl').value.trim();
+  safeSet(SETTINGS_KEY, JSON.stringify(s));
+  closeSettings(); load();
+}
+
+function esc(s){
+  return String(s === null || s === undefined ? '' : s)
+    .replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+/* The sheet may hand back either 2026-08-05 or 05/08/2026 depending on how
+   Sheets stored the cell, so accept both. */
+function parseDate(v){
+  if(!v) return null;
+  const s = String(v).trim();
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if(m) return new Date(+m[1], +m[2]-1, +m[3]);
+  m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if(m) return new Date(+m[3], +m[2]-1, +m[1]);
+  const d = new Date(s);
+  return isNaN(d) ? null : d;
+}
+function ageInfo(v){
+  const d = parseDate(v);
+  if(!d) return { days: -1, label: '\u2014', cls: 'old' };
+  const today = new Date(); today.setHours(0,0,0,0); d.setHours(0,0,0,0);
+  const days = Math.round((today - d) / 86400000);
+  if(days <= 0) return { days: 0, label: 'today', cls: 'new' };
+  if(days === 1) return { days: 1, label: '1 day', cls: 'new' };
+  return { days: days, label: days + ' days', cls: days >= 4 ? 'late' : 'old' };
+}
+function shortForm(name){
+  return String(name || '').replace(/^QF-QC-001 IQC\s*/, '');
+}
+
+let RECORDS = [];
+
+async function load(){
+  const s = loadSettings();
+  const list = document.getElementById('list');
+  const chipState = document.getElementById('chipState');
+  const chipCount = document.getElementById('chipCount');
+  chipState.textContent = 'loading\u2026'; chipState.className = 'chip';
+  if(!s.scriptUrl){
+    list.innerHTML = '<div class="err">No sync endpoint set. Click the \u2699 button.</div>';
+    return;
+  }
+  /* Apps Script answers a /exec GET with a 302 to googleusercontent.com, and
+     that hop intermittently returns an HTML interstitial instead of JSON. One
+     bad hop used to flip the chip straight to "offline", which is the flicker
+     between connected and broken. Retry once before believing it. */
+  let j = null, lastErr = null;
+  for(let attempt = 0; attempt < 2 && j === null; attempt++){
+    if(attempt) await new Promise(r => setTimeout(r, 900));
+    try{
+      const url = s.scriptUrl + (s.scriptUrl.indexOf('?') >= 0 ? '&' : '?') +
+                  'action=list&_ts=' + Date.now();
+      const r = await fetch(url);
+      const text = await r.text();
+      try{ j = JSON.parse(text); }
+      catch(pe){ lastErr = 'The endpoint did not return JSON. Check that the /exec URL is the IQC deployment and that it is shared with anyone who has the link.'; }
+    }catch(e){ lastErr = 'Could not reach the server. Check the network and press Refresh.'; }
+  }
+
+  if(j === null){
+    chipState.textContent = 'offline'; chipState.className = 'chip bad';
+    chipCount.textContent = '\u2014';
+    list.innerHTML = '<div class="err">' + esc(lastErr) + '</div>';
+    return;
+  }
+
+  /* A reachable script that throws still answers 200 with {ok:false,error:...}.
+     Reporting that as "connected, 0 pending" is what hid a broken sheet header,
+     so an error is now shown as an error. */
+  if(j.error || j.ok === false){
+    chipState.textContent = 'script error'; chipState.className = 'chip bad';
+    chipCount.textContent = '\u2014';
+    list.innerHTML = '<div class="err">The IQC script answered with an error:<br><b>' +
+                     esc(j.error || 'unknown') + '</b></div>';
+    return;
+  }
+  if(!j.records){
+    chipState.textContent = 'wrong endpoint'; chipState.className = 'chip bad';
+    chipCount.textContent = '\u2014';
+    list.innerHTML = '<div class="err">That endpoint replied, but not with a record list. ' +
+                     'It is most likely the QC deployment rather than the IQC one.</div>';
+    return;
+  }
+
+  RECORDS = j.records || [];
+  RECORDS.sort((a,b) => (ageInfo(b.date).days) - (ageInfo(a.date).days));
+  render();
+  chipState.textContent = 'connected'; chipState.className = 'chip ok';
+  const forms = new Set(RECORDS.map(x => x.formName));
+  chipCount.textContent = RECORDS.length + ' pending';
+  document.getElementById('sub').textContent = RECORDS.length
+    ? RECORDS.length + ' record(s) across ' + forms.size + ' form(s), oldest first.'
+    : 'Records submitted by IQC and waiting for a supervisor signature.';
+}
+
+function render(){
+  const list = document.getElementById('list');
+  if(!RECORDS.length){
+    list.innerHTML = '<div class="empty">Nothing is waiting for verification.</div>';
+    return;
+  }
+  list.innerHTML = RECORDS.map((rec, i) => {
+    const a = ageInfo(rec.date);
+    const file = FORM_FILES[rec.formName];
+    const title = (rec.jobOrder ? esc(rec.jobOrder) : '(no D/o No.)') +
+                  (rec.description ? ' \u00b7 ' + esc(rec.description) : '') +
+                  (rec.size ? ' \u00b7 ' + esc(rec.size) : '');
+    const meta = [rec.date ? esc(rec.date) : '', rec.inspector ? esc(rec.inspector) : '',
+                  esc(shortForm(rec.formName))].filter(Boolean).join(' \u00b7 ');
+    const btn = file
+      ? '<button class="open" onclick="openRecord(' + i + ')">Open</button>'
+      : '<button class="open" disabled title="No matching file in this folder">Missing file</button>';
+    return '<div class="row"><div class="main"><p class="t1">' + title + '</p>' +
+           '<p class="t2">' + meta + '</p></div>' +
+           '<span class="age ' + a.cls + '">' + a.label + '</span>' + btn + '</div>';
+  }).join('');
+}
+
+function openRecord(i){
+  const rec = RECORDS[i];
+  const file = FORM_FILES[rec.formName];
+  if(!file){
+    alert('No form file matches "' + rec.formName + '" in this folder.\n\n' +
+          'Copy that form next to this page, or add it to FORM_FILES.');
+    return;
+  }
+  const target = encodeURI(file) + '#verify=' + rec.rowNum;   /* # not ? — UNC paths reject a query */
+  const w = window.open(target, '_blank');
+  if(!w) location.href = target;      /* popup blocked \u2192 same tab */
+}
+
+/* Coming back from a form is the moment the list is most likely stale, so
+   refresh on every way a tab can become current again, plus a slow poll. */
+let _last = 0;
+function refreshIfStale(){
+  const now = Date.now();
+  if(now - _last < 1500) return;       /* the events overlap; debounce them */
+  _last = now; load();
+}
+window.addEventListener('focus', refreshIfStale);
+window.addEventListener('pageshow', refreshIfStale);
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState === 'visible') refreshIfStale();
+});
+setInterval(() => { if(document.visibilityState === 'visible') refreshIfStale(); }, 30000);
+refreshIfStale();
+</script>
+<script>
+/* Only on the GitHub https:// copy. On the laptop the hub still runs from
+   the file share, where there is no service worker and none is wanted.
+   isSecureContext rather than a protocol test: it is true on https and on
+   localhost, false on file://, which is exactly the line we want. */
+if(window.isSecureContext && 'serviceWorker' in navigator){
+  window.addEventListener('load', function(){
+    navigator.serviceWorker.register('sw.js').catch(function(){});
+  });
+}
+</script>
+</body>
+</html>
