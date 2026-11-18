@@ -1853,8 +1853,64 @@ function setVerifyMode(on, rowNum){
     setSync('ready','ok');
   }
 }
+/* ---------- finishing a verification ----------
+   A signed record must not be signable again. The hub opens each form in its
+   own tab, so the natural end is for that tab to close itself; when the
+   browser refuses (a tab the user opened by hand cannot be closed by script)
+   the form stays put, visibly finished, instead of looking unsigned. */
+let VERIFY_DONE = false;
+
+function clearVerifyHash(){
+  try{
+    if(window.history && history.replaceState){
+      history.replaceState(null, '', location.pathname + location.search);
+      return;
+    }
+  }catch(e){}
+  try{ location.hash = ''; }catch(e){}
+}
+
+/* Keep the signature on screen and make a second signature impossible. */
+function lockVerified(){
+  VERIFY_DONE = true;
+  const save = document.getElementById('btnVerifySave');
+  if(save){ save.disabled = true; save.textContent = 'Verified \u2713';
+            save.classList.add('btn-done'); }
+  const sign = document.getElementById('btnSign');
+  if(sign){ sign.disabled = true; sign.style.display = 'none'; }
+  const exit = document.getElementById('btnExitVerify');
+  if(exit){ exit.textContent = 'Close'; exit.onclick = closeOrStay; }
+  setSync('verified', 'ok');
+}
+
+/* The hub is still open behind this tab with this record in its pending list.
+   Telling it to refresh saves the supervisor wondering why it is still there. */
+function tellHubRefresh(){
+  try{
+    if(window.opener && !window.opener.closed){
+      window.opener.postMessage({ iqc: 'verified', rowNum: VERIFY_ROW }, '*');
+    }
+  }catch(e){}
+}
+
+function closeOrStay(){
+  try{ window.close(); }catch(e){}
+  /* window.close() is ignored for a tab the script did not open, and there is
+     no way to ask beforehand - so check whether we are still here rather than
+     leaving the supervisor looking at a form with no idea what to do next. */
+  setTimeout(function(){
+    const bar = document.getElementById('chipSync');
+    if(bar) bar.textContent = 'Verified \u2713 - you can close this tab';
+    const save = document.getElementById('btnVerifySave');
+    if(save) save.textContent = 'Verified \u2713';
+  }, 300);
+}
+
 function exitVerifyMode(){
   if(!confirm('Leave verification without saving?')) return;
+  /* Same trap as the save path: reloading with "#verify=" still in the
+     address just re-opens the record that was being left. */
+  clearVerifyHash();
   location.reload();
 }
 
@@ -1937,6 +1993,13 @@ async function loadForVerify(rowNum){
 
 /* ---------- save the verification ---------- */
 async function verifyAndSave(){
+  /* Disabling the button stops a click, not the function. A restored
+     tab, a stray Enter or an old link could still reach it, and a
+     second signature destroys the first one. */
+  if(VERIFY_DONE){
+    alert('This record has already been verified. Press Close to leave this tab.');
+    return;
+  }
   if(!hasSignature()){ alert('Please sign first \u2014 tap Sign on the Verified By line.'); return; }
   /* Signing without being able to see the supporting documents defeats the
      point of collecting them, so this is a hard stop rather than a note. */
@@ -1984,8 +2047,14 @@ async function verifyAndSave(){
     if(!confirmed) confirmed = await pollVerified(u, VERIFY_ROW, 6);
     btn.disabled = false; btn.textContent = 'Verify & Save';
     if(confirmed){
+      /* Clear the row out of the address FIRST. While it is still there any
+         reload - ours, the supervisor's F5, or Chrome restoring the tab -
+         re-opens verify mode on a record that is already signed. */
+      clearVerifyHash();
+      lockVerified();
+      tellHubRefresh();
       alert('\u2705 Verified. The signed copy has replaced the unsigned image on Drive.');
-      location.reload();
+      closeOrStay();
     }else{
       alert('\u26a0\ufe0f Saved, but the server did not confirm in time. Re-open the Verify list in a minute to check before signing again.');
     }
